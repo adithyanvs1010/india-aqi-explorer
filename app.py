@@ -54,6 +54,41 @@ ADVICE = {
     "Severe": "Serious health effects. Avoid going outdoors and keep windows closed.",
 }
 
+# Model evaluation results (train: Jan 2015 to Jun 2019, test: Jul 2019 to Jun 2020)
+RESULTS = pd.DataFrame({
+    "Model": ["Persistence (tomorrow = today)", "Random Forest", "XGBoost"],
+    "MAE": [22.0, 18.9, 19.0],
+    "RMSE": [46.6, 38.0, 37.3],
+    "R2": [0.797, 0.865, 0.871],
+})
+FEATURE_IMP = {
+    "AQI": {"RF": 0.637, "XGB": 0.274},
+    "CO": {"RF": 0.188, "XGB": 0.114},
+    "PM2.5": {"RF": 0.037, "XGB": 0.026},
+    "O3": {"RF": 0.017, "XGB": 0.018},
+    "AQI_roll7": {"RF": 0.014, "XGB": 0.296},
+    "NO2": {"RF": 0.013, "XGB": 0.010},
+    "NOx": {"RF": 0.011, "XGB": 0.016},
+    "NO": {"RF": 0.011, "XGB": 0.032},
+    "AQI_lag3": {"RF": 0.009, "XGB": 0.008},
+    "AQI_lag7": {"RF": 0.009, "XGB": 0.007},
+}
+CM_LABELS = ["Good", "Satisfactory", "Moderate", "Poor", "Very Poor", "Severe"]
+CM = [[374, 389, 7, 0, 0, 0],
+      [70, 2641, 527, 0, 0, 0],
+      [1, 272, 1851, 134, 7, 0],
+      [0, 2, 109, 377, 57, 5],
+      [0, 0, 4, 86, 212, 28],
+      [0, 1, 1, 1, 21, 161]]
+CITY_GAIN = {   # MAE improvement of XGBoost over persistence (positive = better)
+    "Guwahati": 9.7, "Delhi": 8.1, "Ahmedabad": 6.6, "Bhopal": 6.0, "Gurugram": 5.5,
+    "Amritsar": 5.4, "Chandigarh": 5.3, "Kolkata": 5.0, "Lucknow": 4.9, "Jorapokhar": 4.6,
+    "Visakhapatnam": 3.8, "Patna": 3.7, "Brajrajnagar": 3.1, "Jaipur": 2.9, "Mumbai": 2.6,
+    "Talcher": 1.5, "Hyderabad": 1.3, "Chennai": 1.0, "Bengaluru": 1.0,
+    "Thiruvananthapuram": 0.4, "Amaravati": 0.0, "Ernakulam": -1.5, "Kochi": -2.9,
+    "Coimbatore": -2.9, "Shillong": -7.1, "Aizawl": -17.6,
+}
+
 def bucket(a):
     if a <= 50:  return "Good", "#2e7d32"
     if a <= 100: return "Satisfactory", "#7cb342"
@@ -94,7 +129,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4 = st.tabs(["Overview", "Hotspots", "Patterns & Clusters", "Predict"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    ["Overview", "Hotspots", "Patterns & Clusters", "Predict", "Model results"])
 
 # ---------- Overview ----------
 with tab1:
@@ -235,3 +271,49 @@ with tab4:
     st.markdown("<div class='note'>Uses the XGBoost model. Yesterday's values and the 7-day average stay "
                 "as recorded; only the what-if inputs change. The data ends in July 2020, so this is not "
                 "a live forecast.</div>", unsafe_allow_html=True)
+
+# ---------- Model results ----------
+with tab5:
+    st.markdown("Evaluation on a held-out period (Jul 2019 to Jun 2020), after training on Jan 2015 to Jun 2019.")
+
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("XGBoost RMSE", "37.3", "-9.3 vs persistence", delta_color="inverse")
+    k2.metric("XGBoost R²", "0.871", "+0.074 vs persistence")
+    k3.metric("Category accuracy", "76.5%", "+1.1 pts vs persistence")
+    k4.metric("Within one category", "99.6%")
+
+    a, b = st.columns(2)
+    long = RESULTS.melt(id_vars="Model", value_vars=["MAE", "RMSE"], var_name="Metric", value_name="Error")
+    fig = px.bar(long, x="Model", y="Error", color="Metric", barmode="group", text="Error",
+                 color_discrete_sequence=["#4FC3D9", "#FFA726"], title="Prediction error (lower is better)")
+    a.plotly_chart(style(fig, 400))
+
+    imp = pd.DataFrame.from_dict(FEATURE_IMP, orient="index").reset_index().rename(columns={"index": "Feature"})
+    imp = imp.melt(id_vars="Feature", var_name="Model", value_name="Importance")
+    fig = px.bar(imp, y="Feature", x="Importance", color="Model", barmode="group", orientation="h",
+                 color_discrete_map={"RF": "#4FC3D9", "XGB": "#FFA726"}, title="Top 10 feature importances")
+    fig.update_yaxes(categoryorder="array", categoryarray=list(FEATURE_IMP)[::-1])
+    b.plotly_chart(style(fig, 400))
+
+    st.dataframe(RESULTS, hide_index=True)
+
+    c, d = st.columns(2)
+    cm = pd.DataFrame(CM, index=CM_LABELS, columns=CM_LABELS)
+    fig = px.imshow(cm, text_auto=True, color_continuous_scale="Blues",
+                    labels=dict(x="Predicted", y="Actual", color="Days"),
+                    title="Next-day AQI category: actual vs predicted (XGBoost)")
+    c.plotly_chart(style(fig, 460))
+
+    gain = pd.DataFrame({"City": list(CITY_GAIN), "Gain": list(CITY_GAIN.values())}).sort_values("Gain")
+    gain["Result"] = gain.Gain.apply(lambda g: "Better than baseline" if g >= 0 else "Worse than baseline")
+    fig = px.bar(gain, x="Gain", y="City", orientation="h", color="Result",
+                 color_discrete_map={"Better than baseline": "#4FC3D9", "Worse than baseline": "#FF5252"},
+                 title="MAE improvement over persistence, by city")
+    d.plotly_chart(style(fig, 460))
+
+    st.markdown("<div class='note'>Recent AQI history dominates both models; CO and PM2.5 are the most "
+                "informative pollutants. The cities where XGBoost did worse (Aizawl, Shillong, Kochi, "
+                "Ernakulam, Coimbatore) had little or no training data. The Predict tab uses a model "
+                "retrained on all dates, so its past predictions are a demo, not a test. These figures "
+                "come from the earlier train/test split. The test year includes the COVID-19 lockdown.</div>",
+                unsafe_allow_html=True)
