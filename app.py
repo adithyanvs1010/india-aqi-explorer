@@ -136,7 +136,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs(
 with tab1:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Cities", daily.City.nunique())
-    c2.metric("Date range", f"{daily.Date.min():%b %Y} to {daily.Date.max():%b %Y}")
+    c2.metric("Date range", f"{daily.Date.min().year} to {daily.Date.max().year}")
     c3.metric("Highest mean AQI", daily.groupby("City").AQI.mean().idxmax())
     c4.metric("Daily records", f"{len(daily):,}")
 
